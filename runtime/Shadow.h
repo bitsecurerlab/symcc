@@ -214,5 +214,18 @@ template <typename T> bool isConcrete(T *addr, size_t nbytes) {
   return std::all_of(shadow.begin(), shadow.end(),
                      [](SymExpr expr) { return (expr == nullptr); });
 }
+template <typename T> bool isConcrete_flag(T *addr, size_t nbytes, size_t *isConcretePage) {
+  // Fast path for allocations within one page.
+  auto byteBuf = reinterpret_cast<uintptr_t>(addr);
+  if (pageStart(byteBuf) == pageStart(byteBuf + nbytes) &&
+      !g_shadow_pages.count(pageStart(byteBuf))) {
+    *isConcretePage = 1;
+    return true;
+  }
+
+  ReadOnlyShadow shadow(addr, nbytes);
+  return std::all_of(shadow.begin(), shadow.end(),
+                     [](SymExpr expr) { return (expr == nullptr); });
+}
 
 #endif

@@ -146,6 +146,32 @@ ssize_t SYM(read)(int fildes, void *buf, size_t nbyte) {
 
   return result;
 }
+/* A new syscall wrapper, isSymbolicPage is used to indicate if symbolic data is introduced. 
+ * before any symbolic data is introduced, qemu runs without any instrumentation. 
+ */
+ssize_t SYM(read_flag)(int fildes, void *buf, size_t nbyte, size_t *isSymbolicPage) {
+  tryAlternative(buf, _sym_get_parameter_expression(1), SYM(read_flag));
+  tryAlternative(nbyte, _sym_get_parameter_expression(2), SYM(read_flag));
+
+  auto result = read(fildes, buf, nbyte);
+  _sym_set_return_expression(nullptr);
+
+  if (result < 0)
+    return result;
+
+  if (fildes == inputFileDescriptor) {
+    // Reading symbolic input.
+    ReadWriteShadow shadow(buf, result);
+    std::generate(shadow.begin(), shadow.end(),
+                  []() { return _sym_get_input_byte(inputOffset++); });
+    *isSymbolicPage = 1;
+  } else if (!isConcrete(buf, result)) {
+    ReadWriteShadow shadow(buf, result);
+    std::fill(shadow.begin(), shadow.end(), nullptr);
+  }
+
+  return result;
+}
 
 // lseek is a bit tricky because, depending on preprocessor macros, glibc
 // defines it to be a function operating on 32-bit values or aliases it to

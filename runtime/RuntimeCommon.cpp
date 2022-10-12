@@ -78,6 +78,13 @@ void _sym_memmove(uint8_t *dest, const uint8_t *src, size_t length) {
   else
     std::copy(srcShadow.begin(), srcShadow.end(), destShadow.begin());
 }
+bool check_concreteness(uint8_t *addr, size_t length) {
+  if (isConcrete(addr, length)) {
+    return true;
+  } else {
+    return false;
+  }
+}
 
 SymExpr _sym_read_memory(uint8_t *addr, size_t length, bool little_endian) {
   assert(length && "Invalid query for zero-length memory region");
@@ -92,6 +99,39 @@ SymExpr _sym_read_memory(uint8_t *addr, size_t length, bool little_endian) {
   // at all.
   if (isConcrete(addr, length))
     return nullptr;
+
+  ReadOnlyShadow shadow(addr, length);
+  return std::accumulate(shadow.begin_non_null(), shadow.end_non_null(),
+                         static_cast<SymExpr>(nullptr),
+                         [&](SymExpr result, SymExpr byteExpr) {
+                           if (result == nullptr)
+                             return byteExpr;
+
+                           return little_endian
+                                      ? _sym_concat_helper(byteExpr, result)
+                                      : _sym_concat_helper(result, byteExpr);
+                         });
+}
+SymExpr _sym_read_memory_with_flag(uint8_t *addr, size_t length, 
+		                   bool little_endian, size_t *isConcretePage) {
+  assert(length && "Invalid query for zero-length memory region");
+#ifdef DEBUG_RUNTIME
+  std::cerr << "Reading " << length << " bytes from address " << P(addr)
+            << std::endl;
+  dump_known_regions();
+#endif
+
+  //if (isConcrete(addr, length)) return nullptr;
+  if (isConcrete_flag(addr, length, isConcretePage)) {
+    return nullptr;
+  }
+  // If the entire memory region is concrete, don't create a symbolic expression
+  // at all.
+  //auto byteBuf = reinterpret_cast<uintptr_t>(addr);
+  //if (!g_shadow_pages.count(pageStart(byteBuf))) {
+  //    *isConcretePage = 1;
+  //    if (pageStart(byteBuf) == pageStart(byteBuf + length)) return nullptr;
+  //}
 
   ReadOnlyShadow shadow(addr, length);
   return std::accumulate(shadow.begin_non_null(), shadow.end_non_null(),
@@ -122,6 +162,47 @@ void _sym_write_memory(uint8_t *addr, size_t length, SymExpr expr,
   ReadWriteShadow shadow(addr, length);
   if (expr == nullptr) {
     std::fill(shadow.begin(), shadow.end(), nullptr);
+  } else {
+    size_t i = 0;
+    for (SymExpr &byteShadow : shadow) {
+      byteShadow = little_endian
+                       ? _sym_extract_helper(expr, 8 * (i + 1) - 1, 8 * i)
+                       : _sym_extract_helper(expr, (length - i) * 8 - 1,
+                                             (length - i - 1) * 8);
+      i++;
+    }
+  }
+}
+void _sym_write_memory_with_flag(uint8_t *addr, size_t length, SymExpr expr,
+                       bool little_endian, size_t *isConcretePage) {
+  assert(length && "Invalid query for zero-length memory region");
+
+#ifdef DEBUG_RUNTIME
+  std::cerr << "Writing " << length << " bytes to address " << P(addr)
+            << std::endl;
+  dump_known_regions();
+#endif
+  //auto byteBuf = reinterpret_cast<uintptr_t>(addr);
+  //if (!g_shadow_pages.count(pageStart(byteBuf)) && expr==nullptr) {
+      /* setting flag here causes wrong symbolic execution, why? */
+      //*isConcretePage = 1;
+  //    if (pageStart(byteBuf) == pageStart(byteBuf + length)) return;
+  //}
+  if (expr == nullptr && isConcrete_flag(addr, length, isConcretePage)) {
+    return;
+  }
+  //if (expr==nullptr && pageStart(byteBuf) == pageStart(byteBuf + length)) {
+  //  if (!g_shadow_pages.count(pageStart(byteBuf))) {
+      //*isConcretePage = 1;
+  //    return;
+  //  }
+ // }
+  ReadWriteShadow shadow(addr, length);
+  if (expr == nullptr) {
+    std::fill(shadow.begin(), shadow.end(), nullptr);
+    //if (!g_shadow_pages.count(pageStart(byteBuf))) {
+    //    *isConcretePage = 1;
+    //}
   } else {
     size_t i = 0;
     for (SymExpr &byteShadow : shadow) {

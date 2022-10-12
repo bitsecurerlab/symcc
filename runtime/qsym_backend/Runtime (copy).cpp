@@ -18,7 +18,6 @@
 
 #include "Runtime.h"
 #include "GarbageCollection.h"
-
 // C++
 #if __has_include(<filesystem>)
 #define HAVE_FILESYSTEM 1
@@ -96,7 +95,7 @@ std::map<SymExpr, qsym::ExprRef> allocatedExpressions;
 
 SymExpr registerExpression(const qsym::ExprRef &expr) {
   SymExpr rawExpr = expr.get();
-
+  std::cout << ">> " << expr->toString() << std::endl;
   if (allocatedExpressions.count(rawExpr) == 0) {
     // We don't know this expression yet. Create a copy of the shared pointer to
     // keep the expression alive.
@@ -109,6 +108,11 @@ SymExpr registerExpression(const qsym::ExprRef &expr) {
 } // namespace
 
 using namespace qsym;
+//zx012 for investigation
+int allConcrete = 0;
+int createConcrete = 0;
+int allSymbolic = 0;
+int Concrete_Symbolic = 0;
 
 #if HAVE_FILESYSTEM
 namespace fs = std::filesystem;
@@ -183,6 +187,7 @@ SymExpr _sym_build_integer(uint64_t value, uint8_t bits) {
   // Qsym's API takes uintptr_t, so we need to be careful when compiling for
   // 32-bit systems: the compiler would helpfully truncate our uint64_t to fit
   // into 32 bits.
+  createConcrete += 1;
   if constexpr (sizeof(uint64_t) == sizeof(uintptr_t)) {
     // 64-bit case: all good.
     return registerExpression(g_expr_builder->createConstant(value, bits));
@@ -198,29 +203,45 @@ SymExpr _sym_build_integer(uint64_t value, uint8_t bits) {
 }
 
 SymExpr _sym_build_integer128(uint64_t high, uint64_t low) {
+  createConcrete += 1;
   std::array<uint64_t, 2> words = {low, high};
   return registerExpression(g_expr_builder->createConstant({128, words}, 128));
 }
 
 SymExpr _sym_build_null_pointer() {
+  createConcrete += 1;
   return registerExpression(
       g_expr_builder->createConstant(0, sizeof(uintptr_t) * 8));
 }
 
 SymExpr _sym_build_true() {
+  createConcrete += 1;
   return registerExpression(g_expr_builder->createTrue());
 }
 
 SymExpr _sym_build_false() {
+  createConcrete += 1;
   return registerExpression(g_expr_builder->createFalse());
 }
 
 SymExpr _sym_build_bool(bool value) {
+  createConcrete += 1;
   return registerExpression(g_expr_builder->createBool(value));
 }
 
 #define DEF_BINARY_EXPR_BUILDER(name, qsymName)                                \
   SymExpr _sym_build_##name(SymExpr a, SymExpr b) {                            \
+    if (a->isConstant()&&b->isConstant()) {                                    \
+      allConcrete += 1;                                                        \
+    } else if (a == nullptr && b == nullptr) {                                 \
+      std::cout<<"Both are concrete, should not happen here" << std::endl;     \
+    } else if (a->isConstant()){                                               \
+      Concrete_Symbolic += 1;                                                  \
+    } else if (b->isConstant()){                                               \
+      Concrete_Symbolic += 1;                                                  \
+    } else {                                                                   \
+      allSymbolic += 1;                                                        \
+    }                                                                          \
     return registerExpression(g_expr_builder->create##qsymName(                \
         allocatedExpressions.at(a), allocatedExpressions.at(b)));              \
   }
@@ -258,26 +279,51 @@ DEF_BINARY_EXPR_BUILDER(xor, Xor)
 #undef DEF_BINARY_EXPR_BUILDER
 
 SymExpr _sym_build_neg(SymExpr expr) {
+  if (expr->isConstant()) {
+    allConcrete += 1;
+  } else {
+    allSymbolic += 1;
+  }
   return registerExpression(
       g_expr_builder->createNeg(allocatedExpressions.at(expr)));
 }
 
 SymExpr _sym_build_not(SymExpr expr) {
+  if (expr->isConstant()) {
+    allConcrete += 1;
+  } else {
+    allSymbolic += 1;
+  }
   return registerExpression(
       g_expr_builder->createNot(allocatedExpressions.at(expr)));
 }
 
 SymExpr _sym_build_sext(SymExpr expr, uint8_t bits) {
+  if (expr->isConstant()) {
+    allConcrete += 1;
+  } else {
+    allSymbolic += 1;
+  }
   return registerExpression(g_expr_builder->createSExt(
       allocatedExpressions.at(expr), bits + expr->bits()));
 }
 
 SymExpr _sym_build_zext(SymExpr expr, uint8_t bits) {
+  if (expr->isConstant()) {
+    allConcrete += 1;
+  } else {
+    allSymbolic += 1;
+  }
   return registerExpression(g_expr_builder->createZExt(
       allocatedExpressions.at(expr), bits + expr->bits()));
 }
 
 SymExpr _sym_build_trunc(SymExpr expr, uint8_t bits) {
+  if (expr->isConstant()) {
+    allConcrete += 1;
+  } else {
+    allSymbolic += 1;
+  }
   return registerExpression(
       g_expr_builder->createTrunc(allocatedExpressions.at(expr), bits));
 }
@@ -286,10 +332,6 @@ void _sym_push_path_constraint(SymExpr constraint, int taken,
                                uintptr_t site_id) {
   if (constraint == nullptr)
     return;
-  //fprintf(stderr, "constraint pc: 0x%lx\n", site_id);
-  //fprintf(stderr, "path_constraint:  ");
-  //constraint->print(std::cerr);
-  //fprintf(stderr, "\n");
 
   g_solver->addJcc(allocatedExpressions.at(constraint), taken != 0, site_id);
 }
@@ -299,6 +341,15 @@ SymExpr _sym_get_input_byte(size_t offset) {
 }
 
 SymExpr _sym_concat_helper(SymExpr a, SymExpr b) {
+  if (a->isConstant()&&b->isConstant()) {
+    allConcrete += 1;
+  } else if (a->isConstant()) {
+    Concrete_Symbolic += 1;
+  } else if (b->isConstant()) {
+    Concrete_Symbolic += 1;
+  } else {
+    allSymbolic += 1;
+  }
   return registerExpression(g_expr_builder->createConcat(
       allocatedExpressions.at(a), allocatedExpressions.at(b)));
 }
@@ -360,10 +411,28 @@ UNSUPPORTED(SymExpr _sym_build_float_to_unsigned_integer(SymExpr, uint8_t))
 void _sym_notify_call(uintptr_t site_id) {
   g_call_stack_manager.visitCall(site_id);
 }
+int print_frequency = 0;
+std::chrono::system_clock::time_point start;
+void print_map(std::map<SymExpr, qsym::ExprRef> &m) {
+  for (auto it = m.cbegin(); it != m.cend(); ++it) {
+    std::cout << "{" << (*it).first << ": " << (*it).second << "}\n";
+  }
+}
 
 void _sym_notify_ret(uintptr_t site_id) {
+  /*  
+  if (print_frequency == 0) {
+    start = std::chrono::system_clock::now();
+  }
+  if (print_frequency++ % 500 == 0) {
+    auto end = std::chrono::system_clock::now();
+    std::chrono::duration<double> elapsed_seconds = end-start;
+    std::cout << "allconcrete: " << allConcrete << " allsymbolic: " << allSymbolic << " half: " << Concrete_Symbolic << " Create concrete: "<< createConcrete << "elapsed time" << elapsed_seconds.count() << "s" << std::endl;
+  }*/
+  //print_map(allocatedExpressions);
   g_call_stack_manager.visitRet(site_id);
 }
+
 
 void _sym_notify_basic_block(uintptr_t site_id) {
   g_call_stack_manager.visitBasicBlock(site_id);

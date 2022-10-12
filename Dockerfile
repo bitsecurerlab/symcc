@@ -80,6 +80,29 @@ RUN export SYMCC_REGULAR_LIBCXX=yes SYMCC_NO_SYMBOLIC_INPUT=yes \
     && ninja distribution \
     && ninja install-distribution
 
+# Build SymQemu
+RUN cp /etc/apt/sources.list /etc/apt/sources.list~ && \
+    sed -Ei 's/^# deb-src /deb-src /' /etc/apt/sources.list && \
+    apt update
+RUN apt build-dep -y qemu
+# RUN git clone https://github.com/eurecom-s3/symqemu.git /symqemu_source
+COPY ./symqemu /symqemu_source
+WORKDIR /symqemu_build
+RUN /symqemu_source/configure                                     \
+      --audio-drv-list=                                           \
+      --disable-bluez                                             \
+      --disable-sdl                                               \
+      --disable-gtk                                               \
+      --disable-vte                                               \
+      --disable-opengl                                            \
+      --disable-virglrenderer                                     \
+      --target-list=x86_64-linux-user                             \
+      --enable-capstone=git                                       \
+      --symcc-source=/symcc_source                                \
+      --symcc-build=/symcc_build                                  \
+    && make -j 15
+
+
 #
 # The final image
 #
@@ -92,18 +115,23 @@ RUN apt-get update \
         g++ \
         libllvm10 \
         zlib1g \
+        libglib2.0-dev \
         sudo \
     && rm -rf /var/lib/apt/lists/* \
     && useradd -m -s /bin/bash ubuntu \
     && echo 'ubuntu ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/ubuntu
 
 COPY --from=builder /symcc_build /symcc_build
+COPY --from=builder /symcc_source /symcc_source
 COPY --from=builder /root/.cargo/bin/symcc_fuzzing_helper /symcc_build/
 COPY util/pure_concolic_execution.sh /symcc_build/
 COPY --from=builder /libcxx_symcc_install /libcxx_symcc_install
 COPY --from=builder /afl /afl
+COPY --from=builder /symqemu_build /symqemu_build
+COPY --from=builder /symqemu_source /symqemu_source
 
 ENV PATH /symcc_build:$PATH
+ENV PATH /symqemu_build/x86_64-linux-user/:$PATH
 ENV AFL_PATH /afl
 ENV AFL_CC clang-10
 ENV AFL_CXX clang++-10

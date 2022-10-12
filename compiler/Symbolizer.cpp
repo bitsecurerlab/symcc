@@ -133,7 +133,28 @@ void Symbolizer::shortCircuitExpressionUses() {
       bool needRuntimeCheck = originalArgExpression != nullExpression;
       if (needRuntimeCheck && (numUnknownConcreteness == 1))
         continue;
-
+      /*
+        nullChecks = CMPEQ(input.genSymbolicOperand, null)
+        so it means, if it is null (concrete), go to then branch, which is a empty block, end go to tail
+        if it is symbolic, go to the else branch, which is the instrumented symbolic computation. 
+        since unreachable == false, it will skip the instrumented block and go to the tail block. 
+        SplitBlockAndInsertIfThen(Cond, SplitBefore, Reachable, ThenBlock=null) {}
+        before: 
+          Head
+          SplitBefore
+          Tail
+        After
+          Head
+          if (Cond)                        
+            ThenBlock
+          SplitBefore
+          Tail
+              head
+        then  /  \ else
+          empty  SplitBefore
+            |       |
+              Tail
+      */
       if (needRuntimeCheck) {
         auto *argExpressionBlock = SplitBlockAndInsertIfThen(
             nullChecks[argIndex], symbolicComputation.firstInstruction,
@@ -142,7 +163,8 @@ void Symbolizer::shortCircuitExpressionUses() {
       } else {
         IRB.SetInsertPoint(symbolicComputation.firstInstruction);
       }
-
+      //Create expressions for one operand. it creates symbolic expression anyway, since the runtime check will skip this
+      //if it is concrete
       auto *newArgExpression =
           createValueExpression(argument.concreteValue, IRB);
 
