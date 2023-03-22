@@ -219,10 +219,27 @@ template <typename T> bool isConcrete_flag(T *addr, size_t nbytes, size_t *isCon
   auto byteBuf = reinterpret_cast<uintptr_t>(addr);
   if (pageStart(byteBuf) == pageStart(byteBuf + nbytes) &&
       !g_shadow_pages.count(pageStart(byteBuf))) {
-    *isConcretePage = 1;
+    *isConcretePage = 0xf;
     return true;
   }
-
+  // auto page_off = byteBuf - pageStart(byteBuf);
+  // for(int i=0; i < 4096; i+=1024) {
+  //   auto *address = (addr - page_off) + i;
+  //   ReadOnlyShadow shadow(address, 1024);
+  //   if (std::all_of(shadow.begin(), shadow.end(),
+  //                    [](SymExpr expr) { return (expr == nullptr); })) {
+  //     //std::cerr << "concrete subpage " << std::hex << reinterpret_cast<uintptr_t>(address) << " " << std::hex << (i / 1024) << std::endl;
+  //     *isConcretePage |= 1 << (i / 1024);
+  //   } else {
+  //     //std::cerr << "symbolic subpage " << std::hex << reinterpret_cast<uintptr_t>(address) << " " << std::hex << (i / 1024) << std::endl;
+  //     *isConcretePage &= ~(1 << (i / 1024));
+  //   }
+  // }
+  // //std::cerr << "shadow addr 0x" << std::hex << byteBuf << " read size " << nbytes << std::endl;
+  // auto idx = (byteBuf - pageStart(byteBuf)) / 1024;
+  // if ((*isConcretePage >> idx) & 0x1) {
+  //   return true;
+  // }
   ReadOnlyShadow shadow(addr, nbytes);
   return std::all_of(shadow.begin(), shadow.end(),
                      [](SymExpr expr) { return (expr == nullptr); });

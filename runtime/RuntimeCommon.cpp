@@ -213,6 +213,7 @@ void _sym_write_memory_with_flag(uint8_t *addr, size_t length, SymExpr expr,
       i++;
     }
   }
+  isConcrete_flag(addr, length, isConcretePage);
 }
 
 SymExpr _sym_build_extract(SymExpr expr, uint64_t offset, uint64_t length,
